@@ -1,6 +1,7 @@
 %% CS294A/CS294W Programming Assignment Starter Code
 
 % eyulush : adding some debug, trace control
+addpath(genpath('../lib'));
 debug = 1;
 
 %  Instructions
