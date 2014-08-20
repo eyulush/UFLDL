@@ -5,7 +5,7 @@ clear ; close all; clc
 addpath(genpath('../lib'));
 
 debug = 1;
-currPhrase = 2;
+currPhrase = 4;
 
 %  Instructions
 %  ------------
@@ -36,8 +36,9 @@ lambda = 3e-3;         % weight decay parameter
 beta = 3;              % weight of sparsity penalty term      
 trainingSize = 60000;
 
-sae1IterStep = 20;
-sae2IterStep = 100;
+sae1IterStep = 50;
+sae2IterStep = 200;
+sae4IterStep = 100;
 
 %%======================================================================
 %% STEP 1: Load data from the MNIST database
@@ -45,13 +46,13 @@ sae2IterStep = 100;
 %  This loads our training data from the MNIST database files.
 
 % Load MNIST database files
-trainData = loadMNISTImages('mnist/train-images.idx3-ubyte');
-trainLabels = loadMNISTLabels('mnist/train-labels.idx1-ubyte');
+trainData = loadMNISTImages('../data/mnist/train-images.idx3-ubyte');
+trainLabels = loadMNISTLabels('../data/mnist/train-labels.idx1-ubyte');
 
 trainLabels(trainLabels == 0) = 10; % Remap 0 to 10 since our labels need to start from 1
 
-testData = loadMNISTImages('mnist/t10k-images.idx3-ubyte');
-testLabels = loadMNISTLabels('mnist/t10k-labels.idx1-ubyte');
+testData = loadMNISTImages('../data/mnist/t10k-images.idx3-ubyte');
+testLabels = loadMNISTLabels('../data/mnist/t10k-labels.idx1-ubyte');
 
 testLabels(testLabels == 0) = 10; % Remap 0 to 10
 
@@ -81,7 +82,8 @@ else
     
     currSae1Iter = 0;
     currSae2Iter = 0;
-    save('saves/dnn_parameters.mat', 'currSae1Iter','currSae2Iter','-append');
+    currSae4Iter = 0;
+    save('saves/dnn_parameters.mat', 'currSae1Iter','currSae2Iter','currSae4Iter''-append');
 end
 
 %% ---------------------- YOUR CODE HERE  ---------------------------------
@@ -190,24 +192,36 @@ if currPhrase == 1
     trainFeatures = sae1Features;
     testFeatures = testFeaturesL1;
 end
-if currPhrase == 2 || currPhrase == 3
+if currPhrase == 2 
     trainFeatures = sae2Features;
     testFeatures = testFeaturesL2;
 end
+if currPhrase == 3
+    trainFeatures = [sae1Features;sae2Features];
+    testFeatures = [testFeaturesL1;testFeaturesL2];
+end
+
+% parameters for softmax
+softmaxLambda = 1e-4;
+softoptions.Method = 'lbfgs';
+softoptions.maxIter = 400;	  % Maximum number of iterations of L-BFGS to run 
+softoptions.display = 'on';
 
 if currPhrase < 4
-    options.Method = 'lbfgs';
-    options.maxIter = 400;	  % Maximum number of iterations of L-BFGS to run 
-    options.display = 'on';
-
+    
+    hiddenSize = size(trainFeatures,1);
+    if size(saeSoftmaxOptTheta,1) ~= numClasses * hiddenSize; 
+        saeSoftmaxOptTheta = 0.005 * randn(hiddenSize * numClasses, 1);
+    end
+    
     [saeSoftmaxOptTheta, cost] = minFunc( @(p) softmaxCost(p, ...
-                                   numClasses, hiddenSizeL2, lambda, ...
+                                   numClasses, hiddenSize, softmaxLambda, ...
                                    trainFeatures, trainLabels), ...                                   
-                                   saeSoftmaxOptTheta, options);
+                                   saeSoftmaxOptTheta, softoptions);
         
     save('saves/dnn_parameters.mat', 'saeSoftmaxOptTheta','-append');
 
-    saeSoftmaxOptTheta = reshape(saeSoftmaxOptTheta(1:numClasses * hiddenSizeL2), numClasses, hiddenSizeL2);
+    saeSoftmaxOptTheta = reshape(saeSoftmaxOptTheta(1:numClasses * hiddenSize), numClasses, hiddenSize);
     softmaxModel.optTheta = saeSoftmaxOptTheta;
     [pred] = softmaxPredict(softmaxModel, testFeatures);    
     if debug == 1
@@ -215,8 +229,21 @@ if currPhrase < 4
         
         fprintf('Test Accuracy: %f%%\n', testAccurancy);
         save('saves/dnn_parameters.mat','testAccurancy','-append');
+        if testAccurancy > highestTestAccurancy
+            highestTestAccurancy = testAccurancy;
+            save('saves/dnn_parameters.mat','highestTestAccurancy','-append');
+        end
         return
     end
+end
+
+if currPhrase == 4
+   
+    saeSoftmaxOptTheta = 0.005 * randn(hiddenSizeL2 * numClasses, 1);
+    [saeSoftmaxOptTheta, cost] = minFunc( @(p) softmaxCost(p, ...
+                                   numClasses, hiddenSizeL2, softmaxLambda, ...
+                                   sae2Features, trainLabels), ...                                   
+                                   saeSoftmaxOptTheta, softoptions);
 end
 
 %%======================================================================
@@ -244,18 +271,28 @@ stackedAETheta = [ saeSoftmaxOptTheta ; stackparams ];
 %                to "hiddenSizeL2".
 %
 %
-options = struct;
-options.Method = 'lbfgs';
-options.maxIter = 400;
-options.display = 'on';
+if currPhrase == 4
+    if exist('saves/stackedAEOptTheta.mat','file') == 2
+        load('saves/stackedAEOptTheta.mat');
+    else
+        stackedAEOptTheta = stackedAETheta;
+        currSae4Iter = 0;
+        save('saves/stackedAEOptTheta.mat', 'stackedAEOptTheta');
+    end
+    options = struct;
+    options.Method = 'lbfgs';
+    options.maxIter = sae4IterStep;
+    options.display = 'on';
 
-[stackedAEOptTheta, cost] =  minFunc(@(p)stackedAECost(p,inputSize,hiddenSizeL2,...
-                         numClasses, netconfig,lambda, trainData, trainLabels),...
-                        stackedAETheta,options);
-save('saves/stackedAEOptTheta.mat', 'stackedAEOptTheta');
-
+    [stackedAEOptTheta, cost] =  minFunc(@(p)stackedAECost(p,inputSize,hiddenSizeL2,...
+                         numClasses, netconfig,1e-5, trainData, trainLabels),...
+                        stackedAEOptTheta,options);
+    save('saves/stackedAEOptTheta.mat', 'stackedAEOptTheta','-append');
+    
+    currSae4Iter = currSae4Iter + sae4IterStep;
+    save('saves/dnn_parameters.mat','currSae4Iter','-append');
+end
 % -------------------------------------------------------------------------
-
 
 
 %%======================================================================
@@ -271,15 +308,21 @@ save('saves/stackedAEOptTheta.mat', 'stackedAEOptTheta');
 [pred] = stackedAEPredict(stackedAETheta, inputSize, hiddenSizeL2, ...
                           numClasses, netconfig, testData);
 
-acc = mean(testLabels(:) == pred(:));
-fprintf('Before Finetuning Test Accuracy: %0.3f%%\n', acc * 100);
+testAccurancy = mean(testLabels(:) == pred(:)) * 100;
+fprintf('Before Finetuning Test Accuracy: %0.3f%%\n', testAccurancy);
 
 [pred] = stackedAEPredict(stackedAEOptTheta, inputSize, hiddenSizeL2, ...
                           numClasses, netconfig, testData);
 
-acc = mean(testLabels(:) == pred(:));
-fprintf('After Finetuning Test Accuracy: %0.3f%%\n', acc * 100);
+testAccurancy = mean(testLabels(:) == pred(:)) * 100;
+fprintf('After Finetuning Test Accuracy: %0.3f%%\n', testAccurancy);
 
+save('saves/dnn_parameters.mat','testAccurancy','-append');
+if testAccurancy > highestTestAccurancy
+    highestTestAccurancy = testAccurancy;
+    save('saves/dnn_parameters.mat','highestTestAccurancy','-append');
+end
+        
 % Accuracy is the proportion of correctly classified images
 % The results for our implementation were:
 %

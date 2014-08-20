@@ -65,6 +65,7 @@ groundTruth = full(sparse(labels, 1:M, 1));
 depth = numel(stack);
 z = cell(depth+1,1);
 a = cell(depth+1, 1);
+a{1} = data;
 
 % calculate the cost
 for layer = (1:depth)
@@ -76,22 +77,25 @@ M = softmaxTheta * a{depth+1};
 M = bsxfun(@minus, M, max(M));
 p = bsxfun(@rdivide, exp(M), sum(exp(M)));
 
-Jcost = - sum(sum(groundTruth .* log(p))) / labels + lambda * sum(sum(theta.^2)) / 2; % groundTruth, 0-1 sparse matrix. size is numClasss x numCases
+numCases = length(labels);
+cost = - sum(sum(groundTruth .* log(p))) / numCases + lambda * sum(sum(softmaxTheta.^2)) / 2; % groundTruth, 0-1 sparse matrix. size is numClasss x numCases
 
 % calculate the output layer graident
-softmaxThetaGrad = -1/numClasses * (groundTruth - p) * a{depth+1}' + lambda * softmaxTheta;
+softmaxThetaGrad = -1/ numCases   * (groundTruth - p) * a{depth+1}' + lambda * softmaxTheta;
 
 % calculate the hidden layer graident
 d = cell(depth+1);
 d{depth+1} = -(softmaxTheta' * (groundTruth - p)) .* a{depth+1} .* (1-a{depth+1});
 
+% calculate the delta
 for layer = (depth:-1:2)
   d{layer} = (stack{layer}.w' * d{layer+1}) .* a{layer} .* (1-a{layer});
 end
 
+% calculate the graident
 for layer = (depth:-1:1)
-  stackgrad{layer}.w = (1/numClasses) * d{layer+1} * a{layer}';
-  stackgrad{layer}.b = (1/numClasses) * sum(d{layer+1}, 2);
+  stackgrad{layer}.w = (1/numCases) * d{layer+1} * a{layer}';
+  stackgrad{layer}.b = (1/numCases) * sum(d{layer+1}, 2);
 end
 
 % -------------------------------------------------------------------------
